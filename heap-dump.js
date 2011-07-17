@@ -136,11 +136,11 @@ HeapDump.prototype.readRawField = function (obj, fieldname, type)
 };
 
 /* dumps out a summary of the whole graph. */
-HeapDump.prototype.dbgdump = function (out)
+HeapDump.prototype.dbgdumpText = function (out)
 {
 	var id, node;
 
-	console.error('saving summary ... ');
+	console.error('saving text summary ... ');
 
 	for (id in this.hd_graph) {
 		node = this.hd_graph[id];
@@ -151,7 +151,46 @@ HeapDump.prototype.dbgdump = function (out)
 	console.error('done');
 }
 
-HeapDump.prototype.explore = function ()
+HeapDump.prototype.dbgdumpHtml = function (out)
+{
+	var id, node, prop, indent, text;
+
+	console.error('saving HTML summary ... ');
+
+	indent = '&nbsp;&nbsp;&nbsp;&nbsp;';
+	out.write('<div style="font-family: monospace;">\n');
+
+	for (id in this.hd_graph) {
+		node = this.hd_graph[id];
+		text = sprintf('<a name="node%s">NODE %s</a><br />\n',
+		    node['index'], node['index']);
+		for (prop in node) {
+			if (prop == 'children')
+				continue;
+
+			text += sprintf('%s%s: %s<br />\n', indent, prop,
+			    node[prop]);
+		}
+
+		text += sprintf('%schildren: [<br />\n', indent);
+		node['children'].forEach(function (child) {
+			text += sprintf('%s%s{ type: "%s", ' +
+			    'name_or_index: "%s", to_node: "', indent, indent,
+			    child['type'], child['name_or_index']);
+			text += sprintf('<a href="#node%s">%s</a>" }<br />\n',
+			    child['to_node'], child['to_node']);
+		});
+
+		text += sprintf('%s]<br />\n', indent);
+		out.write(text);
+	}
+
+	out.write('</div>');
+
+	console.error('done');
+}
+
+HeapDump.prototype.dbgexplore = function ()
 {
 	var heap = this;
 	var repl = mod_repl.start();
