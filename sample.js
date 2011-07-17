@@ -13,4 +13,6 @@ var stuff = {
 	}
 };
 
+var junk = new Date();
+
 pmd.takeSnapshot();

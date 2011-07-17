@@ -4,7 +4,9 @@
 
 var mod_assert = require('assert');
 var mod_fs = require('fs');
+var mod_repl = require('repl');
 var mod_sys = require('sys');
+
 var sprintf = require('sprintf').sprintf;
 
 /*
@@ -32,7 +34,7 @@ HeapDump.prototype.load = function (contents)
 	this.hd_graph = {};
 	this.hd_nnodes = 0;
 
-	console.error('will read %s entries', this.hd_nodes.length - 1);
+	console.error('will read %s entries', this.hd_nodes.length);
 
 	while (this.hd_nodeidx < this.hd_nodes.length) {
 		this.readNode();
@@ -54,12 +56,13 @@ HeapDump.prototype.readNode = function ()
 	var node;
 
 	node = {};
+	node['index'] = this.hd_nodeidx;
 
 	for (ii = 0; ii < this.hd_fields.length; ii++)
 		node[this.hd_fields[ii]] = this.readRawField(node,
 		    this.hd_fields[ii], this.hd_field_types[ii]);
 
-	this.hd_graph[node['id']] = node;
+	this.hd_graph[node['index']] = node;
 	this.hd_nnodes++;
 };
 
@@ -81,7 +84,22 @@ HeapDump.prototype.readRawField = function (obj, fieldname, type)
 		return (value);
 	}
 
-	if (type == 'number') {
+	/*
+	 * The actual type of the "name_or_index" field depends on the "type" of
+	 * the object we're reading.
+	 */
+	if (fieldname == 'name_or_index') {
+		mod_assert.equal(type, 'string_or_number');
+
+		if (obj['type'] == 'element' || obj['type'] == 'hidden')
+			type = 'number';
+		else
+			type = 'string';
+	}
+
+	mod_assert.notEqual(type, 'string_or_number');
+
+	if (type == 'number' || type == 'node') {
 		value = this.hd_nodes[this.hd_nodeidx++];
 		mod_assert.ok(typeof (value) == 'number');
 		return (value);
@@ -93,12 +111,6 @@ HeapDump.prototype.readRawField = function (obj, fieldname, type)
 		mod_assert.ok(rawval >= 0);
 		mod_assert.ok(rawval < this.hd_strings.length);
 		value = this.hd_strings[rawval];
-		return (value);
-	}
-
-	if (type == 'string_or_number' || type == 'node') {
-		value = this.hd_nodes[this.hd_nodeidx++];
-		/* XXX how do we know which it is? */
 		return (value);
 	}
 
@@ -132,11 +144,81 @@ HeapDump.prototype.dbgdump = function (out)
 
 	for (id in this.hd_graph) {
 		node = this.hd_graph[id];
-		out.write(sprintf('NODE %s: %s\n', id, mod_sys.inspect(node)));
+		out.write(sprintf('NODE %s (%s): %s\n', node['id'],
+		    node['index'], mod_sys.inspect(node)));
 	}
 
 	console.error('done');
 }
+
+HeapDump.prototype.explore = function ()
+{
+	var heap = this;
+	var repl = mod_repl.start();
+
+	repl.context['pnode'] = function (num) {
+		var node = heap.hd_graph[num];
+		console.log([
+			'NODE %s:',
+			'    type: %s',
+			'    name: %s',
+			'    children: %s'
+		    ].join('\n'), num, node['type'], node['name'],
+		    mod_sys.inspect(node['children']));
+	};
+
+	repl.context['node'] = function (num) {
+		var node = heap.hd_graph[num];
+		return ({
+		    index: node['index'],
+		    type: node['type'],
+		    name: node['name'],
+		    children: node['children']
+		});
+	};
+
+	repl.context['children'] = function (num) {
+		var node = heap.hd_graph[num];
+		return (node['children']);
+	};
+
+	repl.context['findstr'] = function (str) {
+		var id, node;
+
+		for (id in heap.hd_graph) {
+			node = heap.hd_graph[id];
+			if (node['type'] == 'string' && node['name'] == str)
+				return (repl.context['node'](node['index']));
+		}
+
+		return (undefined);
+	};
+
+	repl.context['findrefs'] = function (id) {
+		var id, node, rv, ii;
+
+		rv = [];
+
+		for (nid in heap.hd_graph) {
+			node = heap.hd_graph[nid];
+			node['children'].forEach(function (edge) {
+				if (edge['to_node'] != id)
+					return;
+
+				rv.push({
+					node: nid,
+					node_nchildren: node['children_count'],
+					node_name: node['name'],
+					type: edge['type'],
+					name_or_index: edge['name_or_index'],
+					to_node: edge['to_node'],
+				});
+			});
+		}
+
+		return (rv);
+	};
+};
 
 exports.readFile = function (filename, callback)
 {
