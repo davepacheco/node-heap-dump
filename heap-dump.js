@@ -8,6 +8,7 @@ var mod_repl = require('repl');
 var mod_sys = require('sys');
 
 var sprintf = require('sprintf').sprintf;
+mod_repl.writer = function (obj) { return (mod_sys.inspect(obj, false, 5, true)); };
 
 /*
  * Parses the serialized JSON representation of a V8 snapshot.  Note that the
@@ -190,10 +191,13 @@ HeapDump.prototype.dbgdumpHtml = function (out)
 	console.error('done');
 }
 
-HeapDump.prototype.dbgexplore = function ()
+HeapDump.prototype.dbgexplore = function (out)
 {
 	var heap = this;
 	var repl = mod_repl.start();
+	var nodef;
+
+	heap.computeDepths(this.hd_graph[1], 0);
 
 	repl.context['pnode'] = function (num) {
 		var node = heap.hd_graph[num];
@@ -206,14 +210,19 @@ HeapDump.prototype.dbgexplore = function ()
 		    mod_sys.inspect(node['children']));
 	};
 
-	repl.context['node'] = function (num) {
+	repl.context['node'] = nodef = function (num) {
 		var node = heap.hd_graph[num];
 		return ({
 		    index: node['index'],
 		    type: node['type'],
 		    name: node['name'],
+		    depth: node['depth'],
 		    children: node['children']
 		});
+	};
+
+	repl.context['parents'] = function (num) {
+		return (heap.hd_graph[num]['parents']);
 	};
 
 	repl.context['children'] = function (num) {
@@ -227,7 +236,7 @@ HeapDump.prototype.dbgexplore = function ()
 		for (id in heap.hd_graph) {
 			node = heap.hd_graph[id];
 			if (node['type'] == 'string' && node['name'] == str)
-				return (repl.context['node'](node['index']));
+				return (nodef(node['index']));
 		}
 
 		return (undefined);
@@ -257,6 +266,119 @@ HeapDump.prototype.dbgexplore = function ()
 
 		return (rv);
 	};
+
+	repl.context['tree'] = function (nodeid, depth) {
+		if (depth === undefined)
+			depth = 3;
+
+		if (nodeid === undefined)
+			nodeid = 1;
+
+		heap.dumpTree('', nodeid, out, depth, 0);
+	};
+
+	repl.context['dump'] = function (depth) {
+		var rootcld;
+
+		if (depth === undefined)
+			depth = 2;
+
+		rootcld = heap.hd_graph[1]['children'].map(function (elt) {
+			return (elt['to_node']);
+		});
+
+		out.write('Global scope 1\n');
+		heap.dumpTree('', rootcld[0], out, depth, 0);
+		out.write('\nGlobal scope 2\n');
+		heap.dumpTree('', rootcld[1], out, depth, 0);
+		out.write(sprintf('\n%s\n', heap.hd_graph[rootcld[2]]['name']));
+		heap.dumpTree('', rootcld[2], out, depth, 0);
+	};
+
+	repl.context['root'] = function (nodeid) {
+		var path, node, func, bestnext;
+
+		node = heap.hd_graph[nodeid];
+
+		if (nodeid == 1)
+			return ([ {
+				node: nodeid,
+				node_name: node['name'],
+				node_nchildren: node['children_count'],
+			} ]);
+
+		func = arguments.callee;
+
+		for (ii = 0; ii < node['parents'].length; ii++) {
+			if (bestnext === undefined ||
+			    bestnext['depth'] >
+			    heap.hd_graph[node['parents'][ii]]['depth'])
+				bestnext = heap.hd_graph[node['parents'][ii]];
+		}
+
+		mod_assert.ok(bestnext !== undefined);
+		mod_assert.ok(bestnext['depth'] < node['depth']);
+		path = func(bestnext['index']);
+		path.push({
+			node: nodeid,
+			node_name: node['name'],
+			node_nchildren: node['children_count'],
+		});
+		return (path);
+	};
+};
+
+HeapDump.prototype.computeDepths = function (node, depth)
+{
+	var heap = this;
+
+	if (!('depth' in node)) {
+		node['depth'] = depth;
+		node['parents'] = [];
+	}
+
+	node['children'].forEach(function (edge) {
+		var child = heap.hd_graph[edge['to_node']];
+
+		if ('depth' in child && child['depth'] <= depth + 1) {
+			child['parents'].push(node['index']);
+			return;
+		}
+
+		child['parents'] = [ node['index'] ];
+		child['depth'] = depth + 1;
+		heap.computeDepths(child, depth + 1);
+	});
+};
+
+HeapDump.prototype.dumpTree = function (label, nodeid, out, depth, indent)
+{
+	var heap, node, name, indstr, ii;
+
+	indstr = '';
+	for (ii = 0; ii < indent; ii++)
+		indstr += '    ';
+
+	heap = this;
+	node = this.hd_graph[nodeid];
+	name = node['name'];
+	if (name.length > 15)
+		name = sprintf('"%s" ... ', name.substr(0, 15));
+
+	out.write(sprintf('%s%s%s "%s" (length %s, node %s)\n', indstr, label,
+	    node['type'], name, node['name'].length, node['index']));
+
+	if (indent >= depth)
+		return;
+
+	node['children'].forEach(function (child) {
+		if (child['type'] == 'hidden')
+			return;
+
+		heap.dumpTree(sprintf('%s %s: ', child['type'],
+		    child['name_or_index']), child['to_node'], out, depth,
+		    indent + 1);
+	});
 };
 
 exports.readFile = function (filename, callback)

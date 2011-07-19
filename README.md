@@ -61,6 +61,10 @@ following functions:
 - `node(num)`: return the node with index `num`.
 - `findstr(str)`: return the node corresponding to the string `str`.
 - `findrefs(num)`: return nodes referencing the node with index `num`.
+- `parents(num)`: returns array of nodes referencing the specified node
+- `dump(depth)`: dumps out information from the root
+- `tree(num, depth)`: prints a tree of nodes
+- `root(num)`: prints the shortest path from the specified node to the root
 
 For example:
 

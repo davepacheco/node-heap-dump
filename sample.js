@@ -5,7 +5,7 @@
 var pmd = require('pmd');
 
 /* We put this particular object in the heap to try to find it in the dump. */
-var stuff = {
+stuff = {
 	somekey: 'someval',
 	someotherkey: 15,
 	whoa: {
@@ -13,6 +13,6 @@ var stuff = {
 	}
 };
 
-var junk = new Date();
+junk = new Date();
 
 pmd.takeSnapshot();
