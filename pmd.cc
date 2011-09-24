@@ -60,9 +60,22 @@ Handle<Value> take_snapshot(const Arguments& args)
 	FileOutputStream *out;
 	const HeapSnapshot *hsp;
 
-	out = new FileOutputStream(stdout);
+	FILE *fp = stdout;
+
+	bool customOut = args[0]->IsString();
+
+	if (customOut) {
+		String::AsciiValue fname(args[0]);
+		fp = fopen(*fname, "w");
+	}
+
+	out = new FileOutputStream(fp);
 	hsp = HeapProfiler::TakeSnapshot(String::New("snap"));
 	hsp->Serialize(out, HeapSnapshot::kJSON);
+
+	if (customOut) {
+		fclose(fp);
+	}
 
 	Local<Object> rv = Object::New();
 	return (rv);
